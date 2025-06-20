@@ -1,5 +1,5 @@
-account_id,user_id,transaction_amount,recipient_account,sender_country,recipient_country,account_age_days,previous_failed_transactions,transaction_type,purpose
-ACC_101,USER_001,500.0,REC_201,US,FR,365,0,wire_transfer,gift
-ACC_102,USER_002,1250.5,REC_202,IN,DE,120,2,credit,business
-ACC_103,USER_003,320.0,REC_203,UK,US,240,1,debit,personal_transfer
-ACC_104,USER_004,8750.75,REC_204,CA,AU,600,3,wire_transfer,investment
+account_id,user_id,transaction_amount,recipient_account,sender_country,recipient_country,account_age_days,previous_failed_transactions,transaction_type,purpose,sender_account_verified
+ACC_101,USER_001,500.0,REC_201,US,FR,365,0,wire_transfer,gift,True
+ACC_102,USER_002,1250.5,REC_202,IN,DE,120,2,credit,business,False
+ACC_103,USER_003,320.0,REC_203,UK,US,240,1,debit,personal_transfer,True
+ACC_104,USER_004,8750.75,REC_204,CA,AU,600,3,wire_transfer,investment,False
