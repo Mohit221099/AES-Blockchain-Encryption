@@ -1,0 +1,5 @@
+account_id,user_id,account_holder_name,transaction_amount,recipient_account,sender_country,recipient_country,account_age_days,previous_failed_transactions,transaction_type,purpose
+     ACC_001,USER_001,Priyanshu,1200.50,REC_001,US,US,90,0,credit_card,online_purchase
+     ACC_002,USER_002,Mohit,18000.75,REC_002,US,UK,20,3,wire_transfer,business_payment
+     ACC_003,USER_003,Riyaz,7500.25,REC_003,US,CA,60,1,wire_transfer,personal_transfer
+     ACC_004,USER_004,ronit,25000.00,REC_004,US,IN,5,6,wire_transfer,investment
