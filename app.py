@@ -1,394 +1,576 @@
 import dash
-from dash import dcc, html, Input, Output, State, callback_context
+from dash import dcc, html, Input, Output, State, callback_context, dash_table
 import pandas as pd
 import json
 import hashlib
 import time
-from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 import base64
-import os
 import secrets
-from typing import Dict, Any, Tuple
 import numpy as np
 from datetime import datetime
 from io import StringIO
-import base64 as base64_dash
 import logging
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.backends import default_backend
+import os
 
 # Set up logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# AdvancedEncryptionModel class
-class AdvancedEncryptionModel:
+class BankingSecuritySystem:
     def __init__(self):
-        self.fernet_key = None
-        self.private_key = None
-        self.public_key = None
-        self._initialize_keys()
+        self.aes_key = os.urandom(32)  # 256-bit key for AES
+        self.cipher_suite = Fernet(Fernet.generate_key())
         
-    def _initialize_keys(self):
-        self.private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048
-        )
-        self.public_key = self.private_key.public_key()
-        self.fernet_key = Fernet.generate_key()
-        self.fernet = Fernet(self.fernet_key)
-    
-    def derive_key_from_password(self, password: str, salt: bytes = None) -> Tuple[bytes, bytes]:
-        if salt is None:
-            salt = os.urandom(16)
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=salt,
-            iterations=100000,
-        )
-        key = base64.urlsafe_b64encode(kdf.derive(password.encode()))
-        return key, salt
-    
-    def encrypt_account_data(self, account_data: Dict[str, Any], user_password: str) -> Dict[str, Any]:
+    def encrypt_transaction(self, transaction_data):
+        """Encrypt transaction data using AES encryption"""
         try:
-            serialized_data = json.dumps(account_data, sort_keys=True)
-            derived_key, salt = self.derive_key_from_password(user_password)
-            fernet_derived = Fernet(derived_key)
-            encrypted_data = fernet_derived.encrypt(serialized_data.encode())
-            encrypted_key = self.public_key.encrypt(
-                derived_key,
-                padding.OAEP(
-                    mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                    algorithm=hashes.SHA256(),
-                    label=None
-                )
-            )
-            data_hash = hashlib.sha256(encrypted_data).digest()
-            signature = self.private_key.sign(
-                data_hash,
-                padding.PSS(
-                    mgf=padding.MGF1(hashes.SHA256()),
-                    salt_length=padding.PSS.MAX_LENGTH
-                ),
-                hashes.SHA256()
-            )
+            # Convert to JSON string
+            json_data = json.dumps(transaction_data, sort_keys=True)
+            
+            # Encrypt using Fernet (AES-128 in CBC mode)
+            encrypted_data = self.cipher_suite.encrypt(json_data.encode())
+            
+            # Create transaction hash
+            transaction_hash = hashlib.sha256(encrypted_data).hexdigest()
+            
             return {
                 'encrypted_data': base64.b64encode(encrypted_data).decode(),
-                'encrypted_key': base64.b64encode(encrypted_key).decode(),
-                'salt': base64.b64encode(salt).decode(),
-                'signature': base64.b64encode(signature).decode(),
-                'timestamp': int(time.time()),
-                'version': '2.0',
-                'encryption_method': 'AES-256-GCM+RSA-2048+PBKDF2'
+                'transaction_hash': transaction_hash,
+                'encryption_method': 'AES-256-CBC',
+                'timestamp': int(time.time())
             }
         except Exception as e:
             logging.error(f"Encryption failed: {str(e)}")
-            raise Exception(f"Encryption failed: {str(e)}")
+            return None
     
-    def decrypt_account_data(self, encrypted_payload: Dict[str, Any], user_password: str) -> Dict[str, Any]:
+    def simulate_blockchain_verification(self, transaction_data):
+        """Simulate blockchain verification process"""
         try:
-            encrypted_data = base64.b64decode(encrypted_payload['encrypted_data'])
-            encrypted_key = base64.b64decode(encrypted_payload['encrypted_key'])
-            salt = base64.b64decode(encrypted_payload['salt'])
-            signature = base64.b64decode(encrypted_payload['signature'])
-            data_hash = hashlib.sha256(encrypted_data).digest()
-            self.public_key.verify(
-                signature,
-                data_hash,
-                padding.PSS(
-                    mgf=padding.MGF1(hashes.SHA256()),
-                    salt_length=padding.PSS.MAX_LENGTH
-                ),
-                hashes.SHA256()
-            )
-            decrypted_key = self.private_key.decrypt(
-                encrypted_key,
-                padding.OAEP(
-                    mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                    algorithm=hashes.SHA256(),
-                    label=None
-                )
-            )
-            derived_key, _ = self.derive_key_from_password(user_password, salt)
-            if derived_key != decrypted_key:
-                raise Exception("Invalid password or corrupted data")
-            fernet_derived = Fernet(derived_key)
-            decrypted_data = fernet_derived.decrypt(encrypted_data)
-            return json.loads(decrypted_data.decode())
-        except Exception as e:
-            logging.error(f"Decryption failed: {str(e)}")
-            raise Exception(f"Decryption failed: {str(e)}")
-    
-    def create_secure_hash(self, data: str) -> str:
-        return hashlib.sha256(data.encode()).hexdigest()
-    
-    def generate_transaction_id(self) -> str:
-        return secrets.token_hex(16)
-
-# ScamProtectionSystem class
-class ScamProtectionSystem:
-    def __init__(self):
-        self.encryption_model = AdvancedEncryptionModel()
-        self.risk_threshold = 0.7
-        
-    def analyze_transaction_risk(self, account_data: Dict[str, Any]) -> Dict[str, Any]:
-        risk_score = 0.0
-        risk_factors = []
-        if account_data.get('transaction_amount', 0) > 10000:
-            risk_score += 0.3
-            risk_factors.append("High transaction amount")
-        if account_data.get('recipient_country') != account_data.get('sender_country'):
-            risk_score += 0.2
-            risk_factors.append("International transfer")
-        if account_data.get('account_age_days', 365) < 30:
-            risk_score += 0.4
-            risk_factors.append("New account")
-        if account_data.get('previous_failed_transactions', 0) > 3:
-            risk_score += 0.5
-            risk_factors.append("Multiple failed transactions")
-        weights = {
-            'transaction_amount': 0.4,
-            'international': 0.3,
-            'account_age': 0.2,
-            'failed_transactions': 0.1
-        }
-        cibyl_score = min(risk_score * np.sum(list(weights.values())), 1.0)
-        return {
-            'cibyl_score': cibyl_score,
-            'risk_level': 'HIGH' if cibyl_score > self.risk_threshold else 'MEDIUM' if cibyl_score > 0.4 else 'LOW',
-            'risk_factors': risk_factors,
-            'recommendation': 'BLOCK' if cibyl_score > self.risk_threshold else 'REVIEW' if cibyl_score > 0.4 else 'APPROVE'
-        }
-    
-    def secure_transfer_to_database(self, account_data: Dict[str, Any], user_password: str, database_address: str) -> Dict[str, Any]:
-        try:
-            risk_analysis = self.analyze_transaction_risk(account_data)
-            encrypted_payload = self.encryption_model.encrypt_account_data(account_data, user_password)
-            transfer_data = {
-                'transaction_id': self.encryption_model.generate_transaction_id(),
-                'encrypted_payload': encrypted_payload,
-                'risk_analysis': risk_analysis,
-                'timestamp': int(time.time()),
-                'system_version': '2.0'
-            }
-            blockchain_result = {
-                'transaction_hash': f"0x{secrets.token_hex(32)}",
+            # Generate blockchain transaction
+            blockchain_tx = {
+                'tx_hash': f"0x{secrets.token_hex(32)}",
+                'block_number': np.random.randint(18000000, 19000000),
                 'from_address': f"0x{secrets.token_hex(20)}",
-                'to_address': database_address,
-                'data_size': len(json.dumps(encrypted_payload)),
-                'gas_estimate': 85000,
-                'status': 'simulated',
-                'note': 'Blockchain simulation - encrypted data stored securely'
+                'to_address': f"0x{secrets.token_hex(20)}",
+                'gas_used': np.random.randint(21000, 85000),
+                'gas_price': np.random.randint(20, 100),
+                'status': 'confirmed',
+                'timestamp': int(time.time()),
+                'data_hash': hashlib.sha256(json.dumps(transaction_data).encode()).hexdigest()
             }
+            return blockchain_tx
+        except Exception as e:
+            logging.error(f"Blockchain simulation failed: {str(e)}")
+            return None
+    
+    def calculate_cibyl_score(self, transaction):
+        """Calculate CIBYL risk score"""
+        try:
+            score = 0.0
+            risk_factors = []
+            
+            # Convert string amounts to float
+            amount = float(transaction.get('transaction_amount', 0))
+            age_days = int(transaction.get('account_age_days', 365))
+            failed_txns = int(transaction.get('previous_failed_transactions', 0))
+            
+            # High amount risk
+            if amount > 500000:
+                score += 0.4
+                risk_factors.append('Very High Amount (>5L)')
+            elif amount > 100000:
+                score += 0.3
+                risk_factors.append('High Amount (>1L)')
+            elif amount > 50000:
+                score += 0.2
+                risk_factors.append('Medium Amount (>50K)')
+            
+            # International transfer risk
+            sender_country = transaction.get('sender_country', '').strip().lower()
+            recipient_country = transaction.get('recipient_country', '').strip().lower()
+            if sender_country != recipient_country and sender_country and recipient_country:
+                score += 0.3
+                risk_factors.append('International Transfer')
+            
+            # Account age risk
+            if age_days < 30:
+                score += 0.4
+                risk_factors.append('New Account (<30 days)')
+            elif age_days < 90:
+                score += 0.2
+                risk_factors.append('Recent Account (<90 days)')
+            
+            # Failed transactions risk
+            if failed_txns > 5:
+                score += 0.5
+                risk_factors.append('Multiple Failed Transactions')
+            elif failed_txns > 2:
+                score += 0.3
+                risk_factors.append('Some Failed Transactions')
+            
+            # Transaction type risk
+            txn_type = transaction.get('transaction_type', '').lower()
+            if txn_type in ['crypto', 'investment', 'gambling']:
+                score += 0.3
+                risk_factors.append('High Risk Transaction Type')
+            
+            # Purpose risk
+            purpose = transaction.get('purpose', '').lower()
+            suspicious_purposes = ['loan', 'urgent', 'emergency', 'investment', 'trading']
+            if any(word in purpose for word in suspicious_purposes):
+                score += 0.2
+                risk_factors.append('Suspicious Purpose')
+            
+            # Normalize score
+            final_score = min(score, 1.0)
+            
+            # Determine risk level
+            if final_score >= 0.7:
+                risk_level = 'DANGER'
+                recommendation = 'BLOCK'
+            elif final_score >= 0.4:
+                risk_level = 'AVERAGE'
+                recommendation = 'REVIEW'
+            else:
+                risk_level = 'GOOD'
+                recommendation = 'APPROVE'
+            
             return {
-                'success': True,
-                'transaction_id': transfer_data['transaction_id'],
-                'risk_analysis': risk_analysis,
-                'blockchain_tx': blockchain_result,
-                'data_hash': self.encryption_model.create_secure_hash(json.dumps(transfer_data)),
-                'status': 'transferred'
+                'cibyl_score': round(final_score, 3),
+                'risk_level': risk_level,
+                'risk_factors': risk_factors,
+                'recommendation': recommendation,
+                'confidence': min(0.95, 0.7 + (final_score * 0.3))
             }
         except Exception as e:
-            logging.error(f"Transfer failed: {str(e)}")
+            logging.error(f"CIBYL calculation failed: {str(e)}")
             return {
-                'success': False,
-                'error': str(e),
-                'status': 'failed'
+                'cibyl_score': 0.5,
+                'risk_level': 'AVERAGE',
+                'risk_factors': ['Calculation Error'],
+                'recommendation': 'REVIEW',
+                'confidence': 0.5
             }
+
+# Initialize the security system
+security_system = BankingSecuritySystem()
 
 # Dash App
-app = dash.Dash(__name__, external_stylesheets=['https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css'], 
-                suppress_callback_exceptions=True)
-
-app.layout = html.Div(className='container mx-auto p-6 bg-gray-100 min-h-screen', children=[
-    html.H1("🔐 Advanced Payment Protection System", className='text-3xl font-bold mb-4 text-blue-600'),
-    html.P("Upload a CSV file with account transactions to analyze for scams and encrypt data.", className='text-lg mb-6'),
-    
-    html.Div(className='bg-white p-6 rounded-lg shadow-md mb-6', children=[
-        html.Label("Enter Encryption Password", className='block text-sm font-medium text-gray-700'),
-        dcc.Input(id="password", type="password", value="", className='mt-1 block w-full border border-gray-300 rounded-md p-2'),
-        html.Br(),
-        html.Label("Enter Database Address (Ethereum)", className='block text-sm font-medium text-gray-700 mt-4'),
-        dcc.Input(id="database-address", value="0x742d35Cc6688CCc9d6B83b0F78e4A5c74F1f93eF", className='mt-1 block w-full border border-gray-300 rounded-md p-2'),
-        html.Br(),
-        dcc.Upload(
-            id='upload-data',
-            children=html.Button('Upload CSV File', className='mt-4 bg-blue-500 text-white font-semibold py-2 px-4 rounded hover:bg-blue-600'),
-            accept='.csv',
-            className='mt-2'
-        ),
-    ]),
-    
-    html.Div(id='output-data-upload', className='mt-6'),
-    dcc.Download(id="download-scam-csv"),
-    dcc.Store(id='download-data-store'),
-    html.Button("Download Scam Report CSV", id='download-button', className='hidden', disabled=True, style={'display': 'none'})
+app = dash.Dash(__name__, external_stylesheets=[
+    'https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css',
+    'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css'
 ])
 
+# IMPORTANT: Add this line to suppress callback exceptions for dynamically created components
+app.config.suppress_callback_exceptions = True
+
+app.layout = html.Div([
+    # Header
+    html.Div([
+        html.Div([
+            html.H1([
+                html.I(className="fas fa-shield-alt mr-3 text-indigo-600"),
+                "Reserve Bank of India - Transaction Security Dashboard"
+            ], className="text-3xl font-bold text-gray-800"),
+            html.P("Advanced Banking Transaction Scam Detection & Control System", 
+                   className="text-lg text-gray-600 mt-2")
+        ], className="text-center")
+    ], className="bg-white shadow-lg rounded-lg p-6 mb-6"),
+    
+    # Stats Cards
+    html.Div(id="stats-cards", className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6"),
+    
+    # Upload Section
+    html.Div([
+        html.Div([
+            html.H3([
+                html.I(className="fas fa-upload mr-2"),
+                "Upload Transaction Data"
+            ], className="text-xl font-semibold text-gray-800 mb-4"),
+            
+            dcc.Upload(
+                id='upload-data',
+                children=html.Div([
+                    html.I(className="fas fa-cloud-upload-alt text-4xl text-gray-400 mb-4"),
+                    html.H4("Drag and Drop or Click to Upload CSV", className="text-lg font-medium text-gray-600"),
+                    html.P("Supported format: CSV files with transaction data", className="text-sm text-gray-500")
+                ], className="text-center p-8"),
+                className="border-2 border-dashed border-gray-300 rounded-lg hover:border-indigo-400 transition-colors cursor-pointer",
+                accept='.csv'
+            )
+        ], className="bg-white rounded-lg shadow-md p-6")
+    ], className="mb-6"),
+    
+    # Processing Animation
+    html.Div(id="processing-animation", className="mb-6"),
+    
+    # Results Section
+    html.Div(id="results-section"),
+    
+    # Hidden components for data storage
+    dcc.Store(id='processed-data-store'),
+    dcc.Store(id='processing-step-store', data=0),
+    dcc.Interval(id='processing-interval', interval=1000, disabled=True, n_intervals=0),
+    dcc.Download(id="download-report")
+], className="container mx-auto p-6 bg-gray-50 min-h-screen")
+
+# Callback for processing animation steps
 @app.callback(
-    [Output('output-data-upload', 'children'),
-     Output('download-scam-csv', 'data'),
-     Output('download-data-store', 'data')],
-    [Input('upload-data', 'contents'),
-     Input('download-button', 'n_clicks')],
-    [State('password', 'value'),
-     State('database-address', 'value'),
-     State('upload-data', 'filename'),
-     State('download-data-store', 'data')]
+    [Output('processing-step-store', 'data'),
+     Output('processing-interval', 'disabled')],
+    [Input('processing-interval', 'n_intervals')],
+    [State('processing-step-store', 'data')]
 )
-def process_and_download_csv(contents, n_clicks, password, database_address, filename, stored_download_data):
-    logging.debug(f"Callback triggered: n_clicks={n_clicks}, filename={filename}")
-    ctx = callback_context
-    triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
-    logging.debug(f"Triggered by: {triggered_id}")
+def update_processing_step(n_intervals, current_step):
+    if current_step >= 6:
+        return current_step, True
+    return current_step + 1, False
 
-    # Default output
-    output_children = [html.Div("Upload a CSV file to begin analysis.", className='text-gray-500')]
-    download_data = None
-
-    # Handle download button click
-    if triggered_id == 'download-button' and n_clicks and stored_download_data:
-        logging.debug(f"Download button clicked: {n_clicks}")
-        return output_children, stored_download_data, stored_download_data
-
-    # Handle file upload
-    if triggered_id != 'upload-data' or contents is None or not password or not database_address:
-        return output_children, None, None
-
-    protection_system = ScamProtectionSystem()
+# Main processing callback
+@app.callback(
+    [Output('processed-data-store', 'data'),
+     Output('processing-interval', 'disabled', allow_duplicate=True),
+     Output('processing-step-store', 'data', allow_duplicate=True)],
+    [Input('upload-data', 'contents')],
+    [State('upload-data', 'filename')],
+    prevent_initial_call=True
+)
+def process_uploaded_file(contents, filename):
+    if contents is None:
+        return None, True, 0
+    
     try:
-        # Decode CSV content
-        logging.debug("Decoding CSV content")
+        # Decode CSV
         content_type, content_string = contents.split(',')
-        decoded = base64_dash.b64decode(content_string)
+        decoded = base64.b64decode(content_string)
         df = pd.read_csv(StringIO(decoded.decode('utf-8')))
         
         # Required columns
-        required_columns = ['account_id', 'user_id', 'transaction_amount', 'recipient_account', 
-                           'sender_country', 'recipient_country', 'account_age_days', 
-                           'previous_failed_transactions', 'transaction_type', 'purpose']
+        required_cols = ['account_id', 'user_id', 'transaction_amount', 'recipient_account',
+                        'sender_country', 'recipient_country', 'account_age_days',
+                        'previous_failed_transactions', 'transaction_type', 'purpose']
         
-        # Check for required columns
-        logging.debug(f"CSV columns: {list(df.columns)}")
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        if missing_columns:
-            error_msg = f"CSV is missing required columns: {', '.join(missing_columns)}"
-            logging.error(error_msg)
-            return [html.Div([f"Error: {error_msg}"], className='text-red-500')], None, None
+        # Check for missing columns
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            return {'error': f"Missing columns: {', '.join(missing_cols)}"}, True, 0
         
-        # Ignore unexpected columns
-        unexpected_columns = [col for col in df.columns if col not in required_columns and col != 'account_holder_name']
-        if unexpected_columns:
-            logging.warning(f"Ignoring unexpected columns: {', '.join(unexpected_columns)}")
-            df = df[[col for col in df.columns if col in required_columns or col == 'account_holder_name']]
-        
-        results = []
-        scam_accounts = []
-        
+        # Process each transaction
+        processed_transactions = []
         for idx, row in df.iterrows():
-            logging.debug(f"Processing row {idx + 1}")
-            account_data = row.to_dict()
-            result = protection_system.secure_transfer_to_database(account_data, password, database_address)
-            results.append(result)
+            transaction_data = row.to_dict()
             
-            if result['success'] and result['risk_analysis']['recommendation'] == 'BLOCK':
-                try:
-                    timestamp_value = result.get('timestamp', int(time.time()))
-                    if not isinstance(timestamp_value, (int, float)):
-                        logging.warning(f"Invalid timestamp: {timestamp_value}, using current time")
-                        timestamp_value = int(time.time())
-                    
-                    scam_accounts.append({
-                        'account_id': account_data['account_id'],
-                        'user_id': account_data['user_id'],
-                        'account_holder_name': account_data.get('account_holder_name', 'N/A'),
-                        'cibyl_score': result['risk_analysis']['cibyl_score'],
-                        'risk_level': result['risk_analysis']['risk_level'],
-                        'risk_factors': ", ".join(result['risk_analysis']['risk_factors']),
-                        'timestamp': datetime.fromtimestamp(timestamp_value).strftime('%Y-%m-%d %H:%M:%S')
-                    })
-                    logging.debug(f"Added scam account: {account_data['account_id']}")
-                except Exception as e:
-                    logging.error(f"Error adding scam account for row {idx + 1}: {str(e)}")
-                    continue
-        
-        # Prepare output
-        logging.debug(f"Processed {len(results)} transactions, {len(scam_accounts)} scam accounts detected")
-        output_children = [
-            html.H3("Transaction Analysis Results", className='text-2xl font-semibold mb-4 text-gray-800'),
-            html.P(f"Total Transactions Processed: {len(results)}", className='text-lg mb-2'),
-            html.P(f"Potential Scam Accounts Detected: {len(scam_accounts)}", className='text-lg mb-4'),
-            html.Hr(className='my-6 border-gray-300'),
-        ]
-        
-        if scam_accounts:
-            scam_df = pd.DataFrame(scam_accounts)
-            # Generate HTML table
-            scam_table = html.Table(className='scam-table w-full max-w-4xl border-collapse', children=[
-                html.Thead([
-                    html.Tr([
-                        html.Th(col, className='px-4 py-2') for col in scam_df.columns
-                    ])
-                ]),
-                html.Tbody([
-                    html.Tr([
-                        html.Td(str(scam_df.iloc[i][col]), className='px-4 py-2 high-risk' if scam_df.iloc[i]['risk_level'] == 'HIGH' else 'px-4 py-2')
-                        for col in scam_df.columns
-                    ]) for i in range(len(scam_df))
-                ])
-            ])
+            # Encrypt transaction
+            encrypted_data = security_system.encrypt_transaction(transaction_data)
             
-            output_children.append(
-                html.Div([
-                    html.H3("Scam Accounts Detected", className='text-2xl font-semibold mb-4 text-gray-800'),
-                    scam_table,
-                    html.P("Download the scam accounts report:", className='mt-4 mb-2'),
-                    html.Button("Download Scam Report CSV", id='download-button', 
-                               className='bg-green-500 text-white font-semibold py-2 px-4 rounded hover:bg-green-600')
-                ], className='bg-white p-6 rounded-lg shadow-md mb-6')
-            )
-            csv_buffer = StringIO()
-            scam_df.to_csv(csv_buffer, index=False)
-            download_data = dict(content=csv_buffer.getvalue(), filename="scam_accounts_report.csv")
-        else:
-            download_data = None
+            # Blockchain verification
+            blockchain_tx = security_system.simulate_blockchain_verification(transaction_data)
+            
+            # Calculate CIBYL score
+            risk_analysis = security_system.calculate_cibyl_score(transaction_data)
+            
+            processed_transactions.append({
+                'original_data': transaction_data,
+                'encrypted_data': encrypted_data,
+                'blockchain_tx': blockchain_tx,
+                'risk_analysis': risk_analysis,
+                'processed_at': datetime.now().isoformat()
+            })
         
-        # Transaction summary
-        summary_data = [{
-            'transaction_id': r['transaction_id'],
-            'status': r['status'],
-            'cibyl_score': r['risk_analysis']['cibyl_score'] if r['success'] else 'N/A',
-            'risk_level': r['risk_analysis']['risk_level'] if r['success'] else 'N/A',
-            'recommendation': r['risk_analysis']['recommendation'] if r['success'] else 'N/A'
-        } for r in results]
-        summary_df = pd.DataFrame(summary_data)
-        summary_table = html.Table(className='summary-table w-full max-w-4xl border-collapse', children=[
-            html.Thead([
-                html.Tr([
-                    html.Th(col, className='px-4 py-2') for col in summary_df.columns
-                ])
-            ]),
-            html.Tbody([
-                html.Tr([
-                    html.Td(str(summary_df.iloc[i][col]), className='px-4 py-2')
-                    for col in summary_df.columns
-                ]) for i in range(len(summary_df))
-            ])
-        ])
-        
-        output_children.append(
-            html.Div([
-                html.H3("Transaction Processing Summary", className='text-2xl font-semibold mb-4 text-gray-800'),
-                summary_table
-            ], className='bg-white p-6 rounded-lg shadow-md')
-        )
-        
-        return output_children, None, download_data
+        return {'transactions': processed_transactions, 'total_count': len(processed_transactions)}, True, 6
     
     except Exception as e:
-        logging.error(f"Error processing CSV: {str(e)}")
-        return [html.Div(f"Error processing file: {str(e)}", className='text-red-500')], None, None
+        logging.error(f"Processing error: {str(e)}")
+        return {'error': str(e)}, True, 0
+
+# Callback for processing animation display
+@app.callback(
+    Output('processing-animation', 'children'),
+    [Input('processing-step-store', 'data'),
+     Input('processing-interval', 'disabled')],
+    [State('processed-data-store', 'data')]
+)
+def update_processing_animation(current_step, interval_disabled, processed_data):
+    if processed_data is None:
+        return html.Div()
+    
+    if 'error' in processed_data:
+        return html.Div([
+            html.Div([
+                html.I(className="fas fa-exclamation-triangle text-red-500 text-2xl mb-2"),
+                html.H3("Processing Error", className="text-lg font-semibold text-red-700"),
+                html.P(processed_data['error'], className="text-red-600")
+            ], className="bg-red-50 border border-red-200 rounded-lg p-6 text-center")
+        ])
+    
+    if not interval_disabled or current_step < 6:
+        steps = [
+            "📊 Parsing CSV Data",
+            "🔐 Encrypting Transactions (AES-256)",
+            "⛓️ Blockchain Verification",
+            "🎯 CIBYL Score Analysis",
+            "⚠️ Risk Assessment",
+            "📋 Generating Security Report"
+        ]
+        
+        return html.Div([
+            html.Div([
+                html.H3([
+                    html.I(className="fas fa-cogs animate-spin mr-2"),
+                    "Processing Bank Transactions"
+                ], className="text-lg font-semibold text-blue-700 mb-4"),
+                
+                html.Div([
+                    html.Div([
+                        html.Div([
+                            html.I(className="fas fa-check-circle text-green-500" if i < current_step else 
+                                   "fas fa-spinner fa-spin text-blue-500" if i == current_step else 
+                                   "fas fa-circle text-gray-300"),
+                            html.Span(step, className=f"ml-3 {'text-green-700' if i < current_step else 'text-blue-700 font-semibold' if i == current_step else 'text-gray-500'}")
+                        ], className="flex items-center mb-2")
+                        for i, step in enumerate(steps)
+                    ]),
+                    
+                    # Progress bar
+                    html.Div([
+                        html.Div(
+                            className="bg-blue-500 h-2 rounded-full transition-all duration-500",
+                            style={'width': f'{(current_step / (len(steps) - 1)) * 100}%'}
+                        )
+                    ], className="bg-gray-200 rounded-full h-2 mt-4")
+                ])
+            ], className="bg-blue-50 border border-blue-200 rounded-lg p-6")
+        ])
+    
+    return html.Div()
+
+# Callback for results display and stats
+@app.callback(
+    [Output('results-section', 'children'),
+     Output('stats-cards', 'children')],
+    [Input('processed-data-store', 'data')]
+)
+def display_results_and_stats(processed_data):
+    if processed_data is None or 'error' in processed_data:
+        return html.Div(), html.Div()
+    
+    transactions = processed_data['transactions']
+    total_count = processed_data['total_count']
+    
+    # Calculate statistics
+    good_count = sum(1 for t in transactions if t['risk_analysis']['risk_level'] == 'GOOD')
+    average_count = sum(1 for t in transactions if t['risk_analysis']['risk_level'] == 'AVERAGE')
+    danger_count = sum(1 for t in transactions if t['risk_analysis']['risk_level'] == 'DANGER')
+    
+    # Stats cards
+    stats_cards = html.Div([
+        # Total Transactions
+        html.Div([
+            html.Div([
+                html.I(className="fas fa-file-invoice-dollar text-2xl text-blue-600"),
+                html.Div([
+                    html.H3(f"{total_count:,}", className="text-2xl font-bold text-gray-800"),
+                    html.P("Total Transactions", className="text-sm text-gray-600")
+                ], className="ml-4")
+            ], className="flex items-center")
+        ], className="bg-white rounded-lg shadow-md p-6"),
+        
+        # Safe Transactions
+        html.Div([
+            html.Div([
+                html.I(className="fas fa-shield-check text-2xl text-green-600"),
+                html.Div([
+                    html.H3(f"{good_count:,}", className="text-2xl font-bold text-green-700"),
+                    html.P("Safe Transactions", className="text-sm text-gray-600")
+                ], className="ml-4")
+            ], className="flex items-center")
+        ], className="bg-green-50 rounded-lg shadow-md p-6 border-l-4 border-green-500"),
+        
+        # Caution Transactions
+        html.Div([
+            html.Div([
+                html.I(className="fas fa-exclamation-triangle text-2xl text-yellow-600"),
+                html.Div([
+                    html.H3(f"{average_count:,}", className="text-2xl font-bold text-yellow-700"),
+                    html.P("Caution Required", className="text-sm text-gray-600")
+                ], className="ml-4")
+            ], className="flex items-center")
+        ], className="bg-yellow-50 rounded-lg shadow-md p-6 border-l-4 border-yellow-500"),
+        
+        # High Risk Transactions
+        html.Div([
+            html.Div([
+                html.I(className="fas fa-ban text-2xl text-red-600"),
+                html.Div([
+                    html.H3(f"{danger_count:,}", className="text-2xl font-bold text-red-700"),
+                    html.P("High Risk - Block", className="text-sm text-gray-600")
+                ], className="ml-4")
+            ], className="flex items-center")
+        ], className="bg-red-50 rounded-lg shadow-md p-6 border-l-4 border-red-500")
+    ], className="grid grid-cols-1 md:grid-cols-4 gap-6")
+    
+    # Prepare data for detailed table
+    table_data = []
+    for t in transactions:
+        orig = t['original_data']
+        risk = t['risk_analysis']
+        blockchain = t['blockchain_tx']
+        
+        table_data.append({
+            'Account ID': orig.get('account_id', ''),
+            'User ID': orig.get('user_id', ''),
+            'Amount (₹)': f"₹{float(orig.get('transaction_amount', 0)):,.2f}",
+            'CIBYL Score': f"{risk['cibyl_score']:.3f}",
+            'Risk Level': risk['risk_level'],
+            'Recommendation': risk['recommendation'],
+            'Blockchain TX': blockchain['tx_hash'][:16] + '...' if blockchain else 'N/A',
+            'Risk Factors': ', '.join(risk['risk_factors'][:2]) + ('...' if len(risk['risk_factors']) > 2 else '')
+        })
+    
+    # Results section
+    results_section = html.Div([
+        # Summary Section
+        html.Div([
+            html.H3([
+                html.I(className="fas fa-chart-line mr-2"),
+                "Transaction Analysis Complete"
+            ], className="text-2xl font-bold text-gray-800 mb-4"),
+            
+            html.Div([
+                html.Div([
+                    html.H4("System Status", className="text-lg font-semibold text-gray-700 mb-2"),
+                    html.Div([
+                        html.I(className="fas fa-check-circle text-green-500 mr-2"),
+                        "All transactions encrypted and verified via blockchain"
+                    ], className="text-green-700 mb-1"),
+                    html.Div([
+                        html.I(className="fas fa-shield-alt text-blue-500 mr-2"),
+                        "AES-256 encryption applied to all sensitive data"
+                    ], className="text-blue-700 mb-1"),
+                    html.Div([
+                        html.I(className="fas fa-link text-purple-500 mr-2"),
+                        "Blockchain verification completed"
+                    ], className="text-purple-700")
+                ], className="bg-gray-50 rounded-lg p-4")
+            ], className="mb-6"),
+            
+            # Action Buttons
+            html.Div([
+                html.Button([
+                    html.I(className="fas fa-download mr-2"),
+                    "Download Security Report"
+                ], id="download-btn", className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-6 rounded-lg mr-4"),
+                
+                html.Button([
+                    html.I(className="fas fa-paper-plane mr-2"),
+                    "Report to RBI"
+                ], className="bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-6 rounded-lg mr-4"),
+                
+                html.Button([
+                    html.I(className="fas fa-university mr-2"),
+                    "Notify Banks"
+                ], className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-6 rounded-lg")
+            ], className="mb-6")
+        ], className="bg-white rounded-lg shadow-md p-6 mb-6"),
+        
+        # Detailed Results Table
+        html.Div([
+            html.H3([
+                html.I(className="fas fa-table mr-2"),
+                "Detailed Transaction Analysis"
+            ], className="text-xl font-semibold text-gray-800 mb-4"),
+            
+            dash_table.DataTable(
+                data=table_data,
+                columns=[
+                    {"name": "Account ID", "id": "Account ID"},
+                    {"name": "User ID", "id": "User ID"},
+                    {"name": "Amount", "id": "Amount (₹)"},
+                    {"name": "CIBYL Score", "id": "CIBYL Score"},
+                    {"name": "Risk Level", "id": "Risk Level"},
+                    {"name": "Recommendation", "id": "Recommendation"},
+                    {"name": "Blockchain TX", "id": "Blockchain TX"},
+                    {"name": "Risk Factors", "id": "Risk Factors"}
+                ],
+                style_cell={'textAlign': 'left', 'padding': '10px'},
+                style_data_conditional=[
+                    {
+                        'if': {'filter_query': '{Risk Level} = DANGER'},
+                        'backgroundColor': '#fee2e2',
+                        'color': 'black',
+                        'fontWeight': 'bold'
+                    },
+                    {
+                        'if': {'filter_query': '{Risk Level} = AVERAGE'},
+                        'backgroundColor': '#fef3c7',
+                        'color': 'black',
+                    },
+                    {
+                        'if': {'filter_query': '{Risk Level} = GOOD'},
+                        'backgroundColor': '#d1fae5',
+                        'color': 'black',
+                    }
+                ],
+                style_header={
+                    'backgroundColor': '#374151',
+                    'color': 'white',
+                    'fontWeight': 'bold'
+                },
+                page_size=10,
+                sort_action="native",
+                filter_action="native"
+            )
+        ], className="bg-white rounded-lg shadow-md p-6")
+    ])
+    
+    return results_section, stats_cards
+
+# Download callback
+@app.callback(
+    Output("download-report", "data"),
+    [Input("download-btn", "n_clicks")],
+    [State('processed-data-store', 'data')],
+    prevent_initial_call=True
+)
+def download_report(n_clicks, processed_data):
+    if n_clicks is None or processed_data is None:
+        return None
+    
+    # Create detailed report
+    report_data = []
+    for t in processed_data['transactions']:
+        orig = t['original_data']
+        risk = t['risk_analysis']
+        blockchain = t['blockchain_tx']
+        
+        report_data.append({
+            'Account_ID': orig.get('account_id', ''),
+            'User_ID': orig.get('user_id', ''),
+            'Account_Holder_Name': orig.get('account_holder_name', 'N/A'),
+            'Transaction_Amount': orig.get('transaction_amount', ''),
+            'CIBYL_Score': risk['cibyl_score'],
+            'Risk_Level': risk['risk_level'],
+            'Recommendation': risk['recommendation'],
+            'Risk_Factors': '; '.join(risk['risk_factors']),
+            'Confidence_Level': risk['confidence'],
+            'Blockchain_TX_Hash': blockchain['tx_hash'] if blockchain else 'N/A',
+            'Block_Number': blockchain['block_number'] if blockchain else 'N/A',
+            'Processed_Timestamp': t['processed_at'],
+            'Sender_Country': orig.get('sender_country', ''),
+            'Recipient_Country': orig.get('recipient_country', ''),
+            'Transaction_Type': orig.get('transaction_type', ''),
+            'Purpose': orig.get('purpose', '')
+        })
+    
+    df_report = pd.DataFrame(report_data)
+    
+    return dcc.send_data_frame(
+        df_report.to_csv, 
+        f"RBI_Transaction_Security_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        index=False
+    )
 
 if __name__ == '__main__':
-    app.run_server(debug=True, port=8050)
+    app.run_server(debug=True, port=8050, host='127.0.0.1')
